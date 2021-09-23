@@ -3,6 +3,8 @@ import argparse
 import os
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import glob
 
 
 def running_mean(x, n):
@@ -12,83 +14,92 @@ def running_mean(x, n):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('log_files', type=str, nargs='+')
-    parser.add_argument('--plot_sr', default=False, action='store_true')
-    parser.add_argument('--plot_cr', default=False, action='store_true')
-    parser.add_argument('--plot_time', default=False, action='store_true')
+    parser.add_argument('--log_files', type=str, nargs='+', default='logs/')
+    parser.add_argument('--plot_sr', default=True, action='store_true')
+    parser.add_argument('--plot_cr', default=True, action='store_true')
+    parser.add_argument('--plot_time', default=True, action='store_true')
     parser.add_argument('--plot_reward', default=True, action='store_true')
+    parser.add_argument('--plot_return', default=True, action='store_true')
     parser.add_argument('--plot_train', default=True, action='store_true')
     parser.add_argument('--plot_val', default=False, action='store_true')
-    parser.add_argument('--plot_all', default=False, action='store_true')
+    parser.add_argument('--plot_all', default=True, action='store_true')
     parser.add_argument('--window_size', type=int, default=100)
     args = parser.parse_args()
 
     models = []
     max_episodes = None
 
-    ax1 = ax2 = ax3 = ax4 = None
+    ax1 = ax2 = ax3 = ax4 = ax5 = None
     ax1_legends = []
     ax2_legends = []
     ax3_legends = []
     ax4_legends = []
+    ax5_legends = []
 
     if args.plot_all:
-        log_dir = args.log_files[0]
+        log_dir = args.log_files
         if not os.path.isdir(log_dir):
             parser.error('Input argument should be the directory containing all experiment folders')
         # args.log_files = [os.path.join(log_dir, exp_dir, 'output.log') for exp_dir in os.listdir(log_dir)]
         args.log_files = [os.path.join(log_dir, exp_dir, 'output.log') for exp_dir in
-                          ['sarl_linear_adam', 'mp_detach_skip', 'rgl_linear_adam', 'rgl_no_transformation',
-                           'mp_separate_graph']]
+                          ['mprl', 'sarl']]
 
     args.log_files = sorted(args.log_files)
     if not models:
         models = [os.path.basename(log_file[:-11]) for log_file in args.log_files]
     for i, log_file in enumerate(args.log_files):
+        # print(log_file)
+        # log_file = 'mprl/output.log'
         with open(log_file, 'r') as file:
             log = file.read()
-
+        print('reading')
         val_pattern = r"VAL   in episode (?P<episode>\d+) has success rate: (?P<sr>[0-1].\d+), " \
                       r"collision rate: (?P<cr>[0-1].\d+), nav time: (?P<time>\d+.\d+), " \
-                      r"total reward: (?P<reward>[-+]?\d+.\d+)"
+                      r"total reward: (?P<reward>[-+]?\d+.\d+), average return: (?P<return>[-+]?\d+.\d+)"
         val_episode = []
         val_sr = []
         val_cr = []
         val_time = []
         val_reward = []
+        val_return = []
         for r in re.findall(val_pattern, log):
             val_episode.append(int(r[0]))
             val_sr.append(float(r[1]))
             val_cr.append(float(r[2]))
             val_time.append(float(r[3]))
-            val_reward.append(float(r[4]))
+            val_reward.append(float(r[4])/100.0)
+            val_return.append(float(r[5]))
 
-        train_pattern = r"TRAIN in episode (?P<episode>\d+)  in epoch 0 has success rate: (?P<sr>[0-1].\d+), " \
+        train_pattern = r"TRAIN in episode (?P<episode>\d+) has success rate: (?P<sr>[0-1].\d+), " \
                         r"collision rate: (?P<cr>[0-1].\d+), nav time: (?P<time>\d+.\d+), " \
-                        r"total reward: (?P<reward>[-+]?\d+.\d+)"
+                        r"total reward: (?P<reward>[-+]?\d+.\d+), average return: (?P<return>[-+]?\d+.\d+)"
         train_episode = []
         train_sr = []
         train_cr = []
         train_time = []
         train_reward = []
+        train_return =[]
         for r in re.findall(train_pattern, log):
             train_episode.append(int(r[0]))
             train_sr.append(float(r[1]))
             train_cr.append(float(r[2]))
             train_time.append(float(r[3]))
             train_reward.append(float(r[4]))
+            train_return.append(float(r[5]))
         if max_episodes is not None:
             train_episode = train_episode[:max_episodes]
             train_sr = train_sr[:max_episodes]
             train_cr = train_cr[:max_episodes]
             train_time = train_time[:max_episodes]
             train_reward = train_reward[:max_episodes]
+            train_return = train_return[:max_episodes]
 
         # smooth training plot
         train_sr_smooth = running_mean(train_sr, args.window_size)
         train_cr_smooth = running_mean(train_cr, args.window_size)
         train_time_smooth = running_mean(train_time, args.window_size)
         train_reward_smooth = running_mean(train_reward, args.window_size)
+        train_return_smooth = running_mean(train_return, args.window_size)
 
         # plot sr
         if args.plot_sr:
@@ -148,6 +159,25 @@ def main():
             if args.plot_val:
                 ax4.plot(val_episode, val_reward)
                 ax4_legends.append(models[i])
+                ax4.set_title('Reward')
+            ax3.set_xlabel('Episodes')
+            ax3.set_ylabel('Reward')
+            ax3.set_title('Reward')
+
+        # plot reward
+        if args.plot_return:
+            if ax5 is None:
+                _, ax5 = plt.subplots()
+            if args.plot_train:
+                ax5.plot(range(len(train_return_smooth)), train_return_smooth)
+                ax5_legends.append(models[i])
+            if args.plot_val:
+                ax5.plot(val_episode, val_return)
+                ax5_legends.append(models[i])
+                ax5.set_title('Return')
+            ax3.set_xlabel('Episodes')
+            ax3.set_ylabel('Average Return')
+            ax3.set_title('Average Return')
 
         if args.plot_sr:
             ax1.legend(ax1_legends)
