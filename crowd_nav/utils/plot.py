@@ -14,15 +14,15 @@ def running_mean(x, n):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--log_files', type=str, nargs='+', default='logs/')
+    parser.add_argument('--log_files', type=str, nargs='+', default='logs/mprl')
     parser.add_argument('--plot_sr', default=True, action='store_true')
     parser.add_argument('--plot_cr', default=True, action='store_true')
     parser.add_argument('--plot_time', default=True, action='store_true')
     parser.add_argument('--plot_reward', default=True, action='store_true')
     parser.add_argument('--plot_return', default=True, action='store_true')
     parser.add_argument('--plot_train', default=True, action='store_true')
-    parser.add_argument('--plot_val', default=False, action='store_true')
-    parser.add_argument('--plot_all', default=True, action='store_true')
+    parser.add_argument('--plot_val', default=True, action='store_true')
+    parser.add_argument('--plot_all', default=False, action='store_true')
     parser.add_argument('--window_size', type=int, default=100)
     args = parser.parse_args()
 
@@ -43,8 +43,10 @@ def main():
         # args.log_files = [os.path.join(log_dir, exp_dir, 'output.log') for exp_dir in os.listdir(log_dir)]
         args.log_files = [os.path.join(log_dir, exp_dir, 'output.log') for exp_dir in
                           ['mprl', 'sarl']]
-
-    args.log_files = sorted(args.log_files)
+        args.log_files = sorted(args.log_files)
+    else:
+        log_dir = args.log_files
+        args.log_files = [os.path.join(log_dir, 'output.log')]
     if not models:
         models = [os.path.basename(log_file[:-11]) for log_file in args.log_files]
     for i, log_file in enumerate(args.log_files):
