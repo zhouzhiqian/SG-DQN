@@ -59,7 +59,7 @@ class Explorer(object):
                 if isinstance(info, Discomfort):
                     discomfort += 1
                     min_dist.append(info.min_dist)
-
+            states.append(self.robot.policy.last_state)
             if isinstance(info, ReachGoal):
                 success += 1
                 success_times.append(self.env.global_time)
