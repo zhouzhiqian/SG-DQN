@@ -7,7 +7,7 @@ from crowd_nav.policy.model_predictive_rl import ModelPredictiveRL
 from crowd_nav.policy.gat_predictive_rl import GatPredictiveRL
 from crowd_nav.policy.tree_searchrl import TreeSearchRL
 from crowd_nav.policy.TD3_rl import TD3RL
-
+from crowd_nav.policy.tree_qn_rl import TreeQNRL
 
 policy_factory['cadrl'] = CADRL
 policy_factory['lstm_rl'] = LstmRL
@@ -16,3 +16,4 @@ policy_factory['gcn'] = GCN
 policy_factory['model_predictive_rl'] = ModelPredictiveRL
 policy_factory['tree_search_rl'] = TreeSearchRL
 policy_factory['td3_rl'] = TD3RL
+policy_factory['tree_qn_rl'] = TreeQNRL
