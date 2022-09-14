@@ -6,23 +6,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from crowd_nav.policy.graph_model import RGL,GAT_RL
+from crowd_nav.utils.einsum import einsum
 
 def build_transition_fn(name, config, nonlin=nn.Tanh(), kernel_size=None):
     embedding_dim = config.gcn.X_dim
     num_actions = config.action_space.speed_samples * config.action_space.rotation_samples + 1
     transition_fun1 = nn.Linear(embedding_dim, embedding_dim)
-    transition_fun2 = Parameter(torch.Tensor(embedding_dim, embedding_dim, num_actions).type(dtype))
+    transition_fun2 = nn.Parameter(torch.Tensor(embedding_dim, embedding_dim, num_actions))
     return transition_fun1, nn.init.xavier_normal(transition_fun2)
 
 class MLPRewardFn(nn.Module):
     def __init__(self, config):
         super(MLPRewardFn, self).__init__()
-        embedding_dim = config.gcn.X_dim
-        num_actions = config.action_space.speed_samples * config.action_space.rotation_samples + 1
+        self.embedding_dim = config.gcn.X_dim
+        self.num_actions = config.action_space.speed_samples * config.action_space.rotation_samples + 1
         self.mlp = nn.Sequential(
-            nn_init(nn.Linear(embed_dim, 64), w_scale=np.sqrt(2)),
+            nn.Linear(self.embedding_dim, 64, bias=True),
             nn.ReLU(inplace=True),
-            nn_init(nn.Linear(64, num_actions), w_scale=0.01)
+            nn.Linear(64, self.num_actions, bias=True)
         )
 
     def forward(self, x):
@@ -51,12 +52,14 @@ class TreeQNNetwork(nn.Module):
         self.td_lambda = td_lambda
         self.value_aggregation = value_aggregation
         self.tree_depth = config.model_predictive_rl.planning_depth
+        self.robot_state_dim = 9
+        self.human_state_dim = 5
 
         self.graph_model = GAT_RL(config, self.robot_state_dim, self.human_state_dim)
 
         # construct the value function
-         self.value_fn = nn_init(nn.Linear(config.gcn.X_dim, 1), w_scale=.01)
-
+        # self.value_fn = nn.ortho_init(nn.Linear(config.gcn.X_dim, 1), w_scale=.01)
+        self.value_fn = nn.Linear(config.gcn.X_dim, 1, bias=True)
         # construct the transition function
         transition_fun_name = "relu"
         self.transition_fun_name = transition_fun_name
@@ -66,7 +69,9 @@ class TreeQNNetwork(nn.Module):
             self.transition_nonlin = nn.ReLU()
         else:
             raise ValueError
-        self.transition_fun = build_transition_fn(transition_fun_name, config, nonlin=self.transition_nonlin)
+        self.transition_fun1, self.transition_fun2 = \
+            build_transition_fn(transition_fun_name, config, nonlin=self.transition_nonlin)
+
 
         # construct the reward function
         self.tree_reward_fun = MLPRewardFn(config)
@@ -80,7 +85,8 @@ class TreeQNNetwork(nn.Module):
                  [batch_size x num_actions] -- rewards after first transition
         """
 
-        st = self.graph_model(ob, volatile=volatile)
+        st = self.graph_model(ob)[:,0,:]
+        st = st.squeeze(1)
 
         Q, tree_result = self.planning(st)
 
@@ -106,7 +112,7 @@ class TreeQNNetwork(nn.Module):
             a = torch.multinomial(pi, 1).squeeze()
             return a.data.cpu().numpy()
         else:
-        self.eps_threshold = 0.1
+            self.eps_threshold = 0.1
             sample = random.random()
             if sample > self.eps_threshold:
                 # return the index of the optimal action
@@ -143,11 +149,11 @@ class TreeQNNetwork(nn.Module):
         for i in range(self.tree_depth):
             if self.predict_rewards:
                 r = self.tree_reward_fun(x)
-                tree_result["rewards"].append(r.view(-1, 1))
+                tree_result["rewards"].append(r.reshape(-1, 1))
 
             x = self.tree_transitioning(x)
 
-            x = x.view(-1, self.embedding_dim)
+            x = x.reshape(-1, self.embedding_dim)
 
             tree_result["embeddings"].append(x)
 
@@ -161,14 +167,12 @@ class TreeQNNetwork(nn.Module):
         :param x: [? x embedding_dim]
         :return: [? x num_actions x embedding_dim]
         """
-
         x1 = self.transition_nonlin(self.transition_fun1(x))
         x2 = x + x1
         x2 = x2.unsqueeze(1)
-        x3 = self.transition_nonlin(np.einsum("ij,jab->iba", x, self.transition_fun2))
+        x3 = self.transition_nonlin(einsum("ij,jab->iba", x, self.transition_fun2))
         x2 = x2.expand_as(x3)
         next_state = x2 + x3
-
 #         if self.residual_transition:
 #             next_state = x.unsqueeze(1).expand_as(next_state) + next_state
 #
@@ -201,22 +205,19 @@ class TreeQNNetwork(nn.Module):
             one_step_backup = tree_result["rewards"][-i] + self.gamma*backup_values
 
             if i < self.tree_depth:
-                one_step_backup = one_step_backup.view(batch_size, -1, self.num_actions)
+                one_step_backup = one_step_backup.reshape(batch_size, -1, self.num_actions)
 
                 if self.value_aggregation == "max":
                     max_backup = one_step_backup.max(2)[0]
-                elif self.value_aggregation == "logsumexp":
-                    max_backup = logsumexp(one_step_backup, 2)
                 elif self.value_aggregation == "softmax":
                     max_backup = (one_step_backup * F.softmax(one_step_backup, dim=2)).sum(dim=2)
                 else:
                     raise ValueError("Unknown value aggregation function %s" % self.value_aggregation)
 
                 backup_values = ((1 - self.td_lambda) * tree_result["values"][-i-1] +
-                                 (self.td_lambda) * max_backup.view(-1, 1))
+                                 (self.td_lambda) * max_backup.reshape(-1, 1))
             else:
                 backup_values = one_step_backup
 
-        backup_values = backup_values.view(batch_size, self.num_actions)
-
+        backup_values = backup_values.reshape(batch_size, self.num_actions)
         return backup_values

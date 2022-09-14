@@ -93,13 +93,12 @@ class TreeQNRL(Policy):
 
     def set_time_step(self, time_step):
         self.time_step = time_step
-        self.state_predictor.time_step = time_step
 
     def get_normalized_gamma(self):
         return pow(self.gamma, self.time_step * self.v_pref)
 
     def get_model(self):
-        return self.value_fn
+        return self.treeqn
 
     def get_traj(self):
         return self.traj
@@ -110,7 +109,7 @@ class TreeQNRL(Policy):
                 }
 
     def load_state_dict(self, state_dict):
-            self.treeqn.load_state_dict(state_dict['treeqn']))
+            self.treeqn.load_state_dict(state_dict['treeqn'])
 
     def save_model(self, file):
         torch.save(self.get_state_dict(), file)
@@ -119,18 +118,49 @@ class TreeQNRL(Policy):
         checkpoint = torch.load(file)
         self.load_state_dict(checkpoint)
 
+
+    def build_action_space(self, v_pref):
+        """
+        Action space consists of 25 uniformly sampled actions in permitted range and 25 randomly sampled actions.
+        """
+        holonomic = True if self.kinematics == 'holonomic' else False
+        # speeds = [(np.exp((i + 1) / self.speed_samples) - 1) / (np.e - 1) * v_pref for i in range(self.speed_samples)]
+        speeds = [(i+1)/self.speed_samples * v_pref for i in range(self.speed_samples)]
+        if holonomic:
+            rotations = np.linspace(0, 2 * np.pi, self.rotation_samples, endpoint=False)
+        else:
+            if self.rotation_constraint == np.pi:
+                rotations = np.linspace(-self.rotation_constraint, self.rotation_constraint, self.rotation_samples, endpoint=False)
+            else:
+                rotations = np.linspace(-self.rotation_constraint, self.rotation_constraint, self.rotation_samples)
+
+        action_space = [ActionXY(0, 0) if holonomic else ActionRot(0, 0)]
+        self.action_group_index.append(0)
+
+        for i, rotation in enumerate(rotations):
+            for j, speed in enumerate(speeds):
+                action_index = i * self.speed_samples + j + 1
+                self.action_group_index.append(action_index)
+                if holonomic:
+                    action_space.append(ActionXY(speed * np.cos(rotation), speed * np.sin(rotation)))
+                else:
+                    action_space.append(ActionRot(speed, rotation))
+        self.speeds = speeds
+        self.rotations = rotations
+        self.action_space = action_space
+
     def predict(self, state):
         self.count=self.count+1
         if self.phase is None or self.device is None:
             raise AttributeError('Phase, device attributes have to be set!')
         if self.phase == 'train' and self.epsilon is None:
             raise AttributeError('Epsilon attribute has to be set in training phase')
-        # self.v_pref = state.robot_state.v_pref
         if self.reach_destination(state):
             return ActionXY(0, 0) if self.kinematics == 'holonomic' else ActionRot(0, 0)
         if self.action_space is None:
             self.build_action_space(self.v_pref)
         state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
-        max_action_index = self.treeqn.step(state)
-        max_action = self.action_space[max_action_index[0]]
-        return max_action, int(max_action_index[0])
+        self.last_state = self.transform(state)
+        max_action_index = self.treeqn.step(state_tensor)[0]
+        max_action = self.action_space[int(max_action_index)]
+        return max_action, int(max_action_index)

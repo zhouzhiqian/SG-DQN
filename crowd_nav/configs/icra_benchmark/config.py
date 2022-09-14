@@ -15,7 +15,7 @@ class BaseEnvConfig(object):
     env = Config()
     env.time_limit = 30
     env.time_step = 0.25
-    env.val_size = 100
+    env.val_size = 10
     env.test_size = 1000
     env.train_size = np.iinfo(np.uint32).max - 2000
     env.randomize_attributes = False
@@ -132,7 +132,7 @@ class BasePolicyConfig(object):
 
 class BaseTrainConfig(object):
     trainer = Config()
-    trainer.batch_size = 100
+    trainer.batch_size = 64
     trainer.optimizer = 'Adam'
 
     imitation_learning = Config()
@@ -146,7 +146,7 @@ class BaseTrainConfig(object):
     train.rl_train_epochs = 1
     train.rl_learning_rate = 0.001
     # number of batches to train at the end of training episode il_episodes
-    train.train_batches = 50
+    train.train_batches = 30
     # training episodes in outer loop
     train.train_episodes = 10000
     # number of episodes sampled in one training episode

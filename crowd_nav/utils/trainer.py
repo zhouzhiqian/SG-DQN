@@ -7,7 +7,8 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from crowd_sim.envs.utils.action import ActionXY
-
+from crowd_nav.utils.treeqn_utils import get_paths
+import numpy as np
 
 class TSRLTrainer(object):
     def __init__(self, value_estimator, state_predictor, memory, device, policy, writer, batch_size, optimizer_str, human_num,
@@ -662,10 +663,6 @@ class TD3RLTrainer(object):
             batch_count += 1
             if batch_count > num_batches or batch_count == batch_num:
                 break
-
-
-
-
         average_v_loss = v_losses / num_batches
         average_s_loss = s_losses / num_batches
         logging.info('Average loss : %.2E, %.2E', average_v_loss, average_s_loss)
@@ -676,6 +673,117 @@ class TD3RLTrainer(object):
         self.target_critic_network.eval()
         self.target_actor_network.eval()
         return average_v_loss, average_s_loss
+
+
+class TREEQNRLTrainer(object):
+    def __init__(self, value_estimator, memory, device, policy, writer, batch_size, optimizer_str, human_num,
+                 reduce_sp_update_frequency, freeze_state_predictor, detach_state_predictor, share_graph_model):
+        """
+        Train the trainable model of a policy
+        """
+        self.value_estimator = value_estimator
+
+        self.device = device
+        self.writer = writer
+        self.target_policy = policy
+        self.target_model = None
+        self.criterion = nn.MSELoss().to(device)
+        self.memory = memory
+        self.data_loader = None
+        self.batch_size = batch_size
+        self.optimizer_str = optimizer_str
+        self.reduce_sp_update_frequency = reduce_sp_update_frequency
+        self.state_predictor_update_interval = human_num
+        self.freeze_state_predictor = freeze_state_predictor
+        self.detach_state_predictor = detach_state_predictor
+        self.share_graph_model = share_graph_model
+        self.v_optimizer = None
+
+        # for value update
+        self.gamma = 0.9
+        self.time_step = 0.25
+        self.v_pref = 1
+
+    def update_target_model(self, target_model):
+        self.target_model = copy.deepcopy(target_model)
+
+    def set_learning_rate(self, learning_rate):
+        if self.optimizer_str == 'Adam':
+            self.v_optimizer = optim.Adam(self.value_estimator.parameters(), lr=learning_rate)
+        elif self.optimizer_str == 'SGD':
+            self.v_optimizer = optim.SGD(self.value_estimator.parameters(), lr=learning_rate, momentum=0.9)
+        else:
+            raise NotImplementedError
+
+    def set_rl_learning_rate(self, learning_rate):
+        if self.optimizer_str == 'Adam':
+            self.v_optimizer = optim.Adam(self.value_estimator.parameters(), lr=learning_rate)
+        elif self.optimizer_str == 'SGD':
+            self.v_optimizer = optim.SGD(self.value_estimator.parameters(), lr=learning_rate, momentum=0.9)
+        else:
+            raise NotImplementedError
+        logging.info('Lr: {} for parameters {} with {} optimizer'.format(learning_rate, ' '.join(
+            [name for name, param in list(self.value_estimator.named_parameters())]), self.optimizer_str))
+
+    def optimize_batch(self, num_batches, episode):
+        if self.v_optimizer is None:
+            raise ValueError('Learning rate is not set!')
+        if self.data_loader is None:
+            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True)
+        v_losses = 0
+        sim_v_losses = 0
+        s_losses = 0
+        batch_count = 0
+        self.target_model.eval()
+        self.value_estimator.eval()
+        for data in self.data_loader:
+            batch_num = int(self.data_loader.sampler.num_samples // self.batch_size)
+            robot_states, human_states, actions, _, done, rewards, next_robot_states, next_human_states = data
+
+            # optimize value estimator
+            self.v_optimizer.zero_grad()
+            actions = actions.to(self.device)
+            # outputs = self.value_estimator((robot_states, human_states))
+            #利用value estimator计算当前动作下的q_value
+            Q_outputs,Value,Tree = self.value_estimator(rotate((robot_states, human_states)))
+            outputs = Q_outputs.gather(1, actions.unsqueeze(1))
+            gamma_bar = pow(self.gamma, self.time_step * self.v_pref)
+            #利用value_estimaor选取s_(t+1)下的最优动作
+            next_Q_output, next_Value, next_Tree = self.value_estimator(rotate((next_robot_states, next_human_states)))
+            max_next_Q_index = torch.max(next_Q_output, dim=1)[1]
+            #利用target model估计最优动作对应的q_value
+            #这就是一个double DQN版本，而不是dqn版本
+            target_Q_output, target_Value, target_Tree = self.target_model(rotate((next_robot_states, next_human_states)))
+            next_Q_value = target_Q_output.gather(1, max_next_Q_index.unsqueeze(1))
+            # 这个是DQN版本
+            # next_Q_values = self.target_model((next_robot_states, next_human_states))
+            # next_Q_value, _ = torch.max(next_Q_values, dim=1)
+            # for DQN
+            done_infos = (1-done)
+            target_values = rewards + torch.mul(done_infos, next_Q_value * gamma_bar)
+            # clip_base = outputs - target_values
+            value_loss = self.criterion(outputs, target_values)
+            if True:
+                actions = actions.unsqueeze(dim=1)
+                r_taken = get_paths(Tree["rewards"], actions, actions.shape[0], 81)
+                rew_loss = F.mse_loss(torch.cat(r_taken, 1), rewards)
+                value_loss = value_loss + rew_loss * 1.0
+                reward_loss = rew_loss.data.cpu().numpy()
+
+            value_loss.backward()
+            self.v_optimizer.step()
+            v_losses += value_loss.data.item()
+            batch_count += 1
+            if batch_count > num_batches or batch_count == batch_num:
+                break
+
+
+        average_v_loss = v_losses / num_batches
+        logging.info('Average loss : %.2E', average_v_loss)
+        self.writer.add_scalar('RL/average_v_loss', average_v_loss, episode)
+        self.value_estimator.train()
+        return average_v_loss
+
 
 def pad_batch(batch):
     """
@@ -697,3 +805,71 @@ def pad_batch(batch):
     next_states = sort_states(3)
 
     return states, values, rewards, next_states
+
+
+def rotate(state):
+    """
+    Transform the coordinate to agent-centric.
+    Input tuple include robot state tensor and human state tensor.
+    robot state tensor is of size (batch_size, number, state_length)(for example 100*1*9)
+    human state tensor is of size (batch_size, number, state_length)(for example 100*5*5)
+    """
+    # for robot
+    # 'px', 'py', 'vx', 'vy', 'radius', 'gx', 'gy', 'v_pref', 'theta'
+    #  0     1      2     3      4        5     6      7         8
+    # for human
+    #  'px', 'py', 'vx', 'vy', 'radius'
+    #  0     1      2     3      4
+    assert len(state[0].shape) == 3
+    if len(state[1].shape) == 3:
+        batch = state[0].shape[0]
+        robot_state = state[0]
+        human_state = state[1]
+        human_num = state[1].shape[1]
+        dx = robot_state[:, :, 5] - robot_state[:, :, 0]
+        dy = robot_state[:, :, 6] - robot_state[:, :, 1]
+        dx = dx.unsqueeze(1)
+        dy = dy.unsqueeze(1)
+        dg = torch.norm(torch.cat([dx, dy], dim=2), 2, dim=2, keepdim=True)
+        rot = torch.atan2(dy, dx)
+        cos_rot = torch.cos(rot)
+        sin_rot = torch.sin(rot)
+        transform_matrix = torch.cat((cos_rot, -sin_rot, sin_rot, cos_rot), dim=1).reshape(batch, 2, 2)
+        robot_velocities = torch.bmm(robot_state[:, :, 2:4], transform_matrix)
+        radius_r = robot_state[:, :, 4].unsqueeze(1)
+        v_pref = robot_state[:, :, 7].unsqueeze(1)
+        target_heading = torch.zeros_like(radius_r)
+        pos_r = torch.zeros_like(robot_velocities)
+        cur_heading = (robot_state[:, :, 8].unsqueeze(1) - rot + np.pi) % (2 * np.pi) - np.pi
+        new_robot_state = torch.cat((pos_r, robot_velocities, radius_r, dg, target_heading, v_pref, cur_heading), dim=2)
+        human_positions = human_state[:, :, 0:2] - robot_state[:, :, 0:2]
+        human_positions = torch.bmm(human_positions, transform_matrix)
+        human_velocities = human_state[:, :, 2:4]
+        human_velocities = torch.bmm(human_velocities, transform_matrix)
+        human_radius = human_state[:, :, 4].unsqueeze(2) + 0.3
+        new_human_state = torch.cat((human_positions, human_velocities, human_radius), dim=2)
+        new_state = (new_robot_state, new_human_state)
+        return new_state
+    else:
+        batch = state[0].shape[0]
+        robot_state = state[0]
+        dx = robot_state[:, :, 5] - robot_state[:, :, 0]
+        dy = robot_state[:, :, 6] - robot_state[:, :, 1]
+        dx = dx.unsqueeze(1)
+        dy = dy.unsqueeze(1)
+        radius_r = robot_state[:, :, 4].unsqueeze(1)
+        dg = torch.norm(torch.cat([dx, dy], dim=2), 2, dim=2, keepdim=True)
+        rot = torch.atan2(dy, dx)
+        cos_rot = torch.cos(rot)
+        sin_rot = torch.sin(rot)
+        vx = (robot_state[:, :, 2].unsqueeze(1) * cos_rot +
+              robot_state[:, :, 3].unsqueeze(1) * sin_rot).reshape((batch, 1, -1))
+        vy = (robot_state[:, :, 3].unsqueeze(1) * cos_rot -
+              robot_state[:, :, 2].unsqueeze(1) * sin_rot).reshape((batch, 1, -1))
+        v_pref = robot_state[:, :, 7].unsqueeze(1)
+        theta = robot_state[:, :, 8].unsqueeze(1)
+        px_r = torch.zeros_like(v_pref)
+        py_r = torch.zeros_like(v_pref)
+        new_robot_state = torch.cat((px_r, py_r, vx, vy, radius_r, dg, rot, v_pref, theta), dim=2)
+        new_state = (new_robot_state, None)
+        return new_state

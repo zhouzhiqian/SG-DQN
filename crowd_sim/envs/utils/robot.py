@@ -1,7 +1,7 @@
 from crowd_sim.envs.utils.agent import Agent
 from crowd_sim.envs.utils.state import JointState
 from crowd_sim.envs import policy
-
+import time
 class Robot(Agent):
     def __init__(self, config, section):
         super().__init__(config, section)
@@ -11,7 +11,11 @@ class Robot(Agent):
         if self.policy is None:
             raise AttributeError('Policy attribute has to be set!')
         state = JointState(self.get_full_state(), ob)
+        # start = time.time()
+
         action, action_index = self.policy.predict(state)
+        # end = time.time()
+        # print(end-start)
         return action, action_index
 
     def get_state(self, ob):

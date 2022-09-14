@@ -171,7 +171,7 @@ class Explorer(object):
                 reward = torch.Tensor([rewards[i]]).to(self.device)
                 done = torch.Tensor([dones[i]]).to(self.device)
 
-            if self.target_policy.name == 'ModelPredictiveRL' or self.target_policy.name == 'TreeSearchRL' or self.target_policy.name == 'TD3RL':
+            if self.target_policy.name == 'ModelPredictiveRL' or self.target_policy.name == 'TreeSearchRL' or self.target_policy.name == 'TD3RL' or self.target_policy.name == "TreeQNRL":
                 self.memory.push((state[0], state[1], action, value, done, reward, next_state[0], next_state[1]))
             else:
                 self.memory.push((state, value, done, reward, next_state))
