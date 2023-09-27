@@ -197,7 +197,7 @@ class CentralizedORCA(ORCA):
             self.sim.setAgentPrefVelocity(i, (pref_vel[0], pref_vel[1]))
 
         self.sim.doStep()
-        # ActionXY(*self.sim.getAgentVelocity(i))
-        actions = [ActionXY(0.0,0.0) for i in range(len(state))]
+        # actions = ActionXY(*self.sim.getAgentVelocity(i))
+        actions = [ActionXY(*self.sim.getAgentVelocity(i)) for i in range(len(state))]
 
         return actions

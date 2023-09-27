@@ -699,10 +699,11 @@ class CrowdSim(gym.Env):
                                                  color='red', fontsize=12)]
                             attentions = robot_attention + human_attentions
                         else:
-                            attentions =[plt.text(robot.center[0] + x_offset, robot.center[1] + y_offset,
-                                                  '{:.2f}'.format(self.attention_weights[0][0]),color='black',fontsize=12)] + \
-                                        [plt.text(humans[i].center[0] + x_offset, humans[i].center[1] + y_offset, '{:.2f}'.format(self.attention_weights[0][i+1]),
-                                      color='black',fontsize=12) for i in range(len(self.humans))]
+                            if not self.attention_weights:
+                                attentions =[plt.text(robot.center[0] + x_offset, robot.center[1] + y_offset,
+                                                      '{:.2f}'.format(self.attention_weights[0][0]),color='black',fontsize=12)] + \
+                                            [plt.text(humans[i].center[0] + x_offset, humans[i].center[1] + y_offset, '{:.2f}'.format(self.attention_weights[0][i+1]),
+                                          color='black',fontsize=12) for i in range(len(self.humans))]
                 for i, human in enumerate(humans):
                     ax.add_artist(human)
                     if display_numbers:
@@ -778,7 +779,7 @@ class CrowdSim(gym.Env):
                 # if hasattr(self.robot.policy, 'get_attention_weights'):
                     # self_attention_scores = [plt.text(robot.center[0] - x_offset, robot.center[1] + y_offset,
                     #                                   '{:.2f}'.format(self.attention_weights[0][0]), color='black')]
-                if hasattr(self.robot.policy, 'get_attention_weights'):
+                if hasattr(self.robot.policy, 'get_attention_weights') and not self.attention_weights:
                     human_attentions = []
                     count = 0
                     for i in range(self.human_num + 1):
