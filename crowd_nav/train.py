@@ -294,8 +294,8 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
-    parser.add_argument('--policy', type=str, default='tree_qn_rl')
-    parser.add_argument('--config', type=str, default='configs/icra_benchmark/tree_qn.py')
+    parser.add_argument('--policy', type=str, default='sarl')
+    parser.add_argument('--config', type=str, default='configs/icra_benchmark/sarl.py')
     parser.add_argument('--output_dir', type=str, default='data/output1')
     parser.add_argument('--overwrite', default=False, action='store_true')
     parser.add_argument('--weights', type=str)

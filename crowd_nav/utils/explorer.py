@@ -78,6 +78,7 @@ class Explorer(object):
                 num_discoms.append(num_discom)
             # add the terminal state
             states.append(self.robot.get_state(ob))
+
             if isinstance(info, ReachGoal):
                 success += 1
                 success_times.append(self.env.global_time)
