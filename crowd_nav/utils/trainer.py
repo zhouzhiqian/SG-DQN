@@ -752,7 +752,7 @@ class TREEQNRLTrainer(object):
             next_Q_output, next_Value, next_Tree = self.value_estimator(rotate((next_robot_states, next_human_states)))
             max_next_Q_index = torch.max(next_Q_output, dim=1)[1]
             #利用target model估计最优动作对应的q_value
-            #这就是一个double DQN版本，而不是dqn版本
+            #这就是一个double DQN版本，而不是dqn版本，在double DQN中，用的是一个新的价值估计器。
             target_Q_output, target_Value, target_Tree = self.target_model(rotate((next_robot_states, next_human_states)))
             next_Q_value = target_Q_output.gather(1, max_next_Q_index.unsqueeze(1))
             # 这个是DQN版本
